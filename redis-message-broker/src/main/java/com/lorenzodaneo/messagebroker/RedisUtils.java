@@ -24,6 +24,11 @@ public class RedisUtils {
         return String.format("%s-%s", baseChannel, partition);
     }
 
+    public static Integer getPartitionFromPartitionedChannel(String channel){
+        String[] channelSplit = channel.split("-");
+        return Integer.parseInt(channelSplit[channelSplit.length - 1]);
+    }
+
     public static String getChannelAssignmentsKey(String channel){
         return String.format("assignments:%s", channel);
     }

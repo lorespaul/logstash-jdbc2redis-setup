@@ -40,14 +40,6 @@ public class RedisAssignmentManager {
         this.start();
     }
 
-    private RedisAssignmentManager(ObjectMapper mapper, int partitionsCount){
-        this.redisTemplate = null;
-        this.redissonClient = null;
-        this.mapper = mapper;
-        this.fixedExecutorService = null;
-        this.partitionsCount = partitionsCount;
-    }
-
     public void addStreamConsumer(String baseChannel, String group, CancelChannelSubscription cancelSubscription, AssignmentExecutor executor){
         if(!streamConsumer.containsKey(baseChannel))
             streamConsumer.put(baseChannel, Collections.synchronizedList(new ArrayList<>()));
@@ -65,12 +57,12 @@ public class RedisAssignmentManager {
         }, 0, 10000);
     }
 
-    private void rebalanceAssignments(String baseChannel, Assignments assignments, AssignmentExecutorWrapper executorWrapper){
+    protected void rebalanceAssignments(String baseChannel, Assignments assignments, AssignmentExecutorWrapper executorWrapper){
         String consumerGroup = RedisUtils.getConsumerGroupKey(executorWrapper.getGroup(), executorWrapper.getConsumer());
         List<Integer> currentPartitions = executorWrapper
                 .getRunningChannels()
                 .stream()
-                .map(x -> Integer.parseInt(x.split("-")[1]))
+                .map(RedisUtils::getPartitionFromPartitionedChannel)
                 .collect(Collectors.toList());
         List<Integer> expectedPartitions = Optional
                 .ofNullable(assignments.getAssignmentsByConsumer().get(consumerGroup))
@@ -109,13 +101,13 @@ public class RedisAssignmentManager {
         });
     }
 
-    private void initAssignmentsAndRebalance(String baseChannel, AssignmentExecutorWrapper executorWrapper){
+    protected void initAssignmentsAndRebalance(String baseChannel, AssignmentExecutorWrapper executorWrapper){
             Assignments assignments = initAssignmentsByChannel(baseChannel, executorWrapper.getGroup(), executorWrapper.getConsumer());
             if(assignments != null)
                 rebalanceAssignments(baseChannel, assignments, executorWrapper);
     }
 
-    private Assignments initAssignmentsByChannel(final String baseChannel, final String group, final String consumer){
+    protected Assignments initAssignmentsByChannel(final String baseChannel, final String group, final String consumer){
         String lockKey = RedisUtils.getChannelAssignmentsLockKey(baseChannel);
         Assignments assignments = null;
         RLock lock = getLock(lockKey);
@@ -123,11 +115,9 @@ public class RedisAssignmentManager {
             String channelAssignmentKey = RedisUtils.getChannelAssignmentsKey(baseChannel);
             String strAssignments = redisTemplate.opsForValue().get(channelAssignmentKey);
 
-            if(strAssignments != null && !strAssignments.isEmpty()){
-                assignments = mapper.readValue(strAssignments, Assignments.class);
-            } else {
-                assignments = new Assignments();
-            }
+            assignments = strAssignments != null && !strAssignments.isEmpty() ?
+                    mapper.readValue(strAssignments, Assignments.class) :
+                    new Assignments();
             onInitReassignments(group, consumer, assignments);
             redisTemplate.opsForValue().set(channelAssignmentKey, mapper.writeValueAsString(assignments));
         } catch (Throwable e){
@@ -138,7 +128,7 @@ public class RedisAssignmentManager {
         return assignments;
     }
 
-    private void pullAssignmentsAndRebalance(){
+    protected void pullAssignmentsAndRebalance(){
         streamConsumer.forEach((key, value) -> value.forEach(executorWrapper -> {
             Assignments assignments = pullAssignmentsByChannel(key);
             if (assignments != null)
@@ -146,7 +136,7 @@ public class RedisAssignmentManager {
         }));
     }
 
-    private Assignments pullAssignmentsByChannel(final String baseChannel){
+    protected Assignments pullAssignmentsByChannel(final String baseChannel){
         String channelAssignmentsKey = RedisUtils.getChannelAssignmentsKey(baseChannel);
         String strAssignments = redisTemplate.opsForValue().get(channelAssignmentsKey);
         if(strAssignments != null && !strAssignments.isEmpty()){
@@ -157,7 +147,7 @@ public class RedisAssignmentManager {
         return null;
     }
 
-    private void removeAssignmentsAndRebalance(){
+    protected void removeAssignmentsAndRebalance(){
         streamConsumer.forEach((key, value) -> value.forEach(executorWrapper -> {
             Assignments assignments = removeAssignmentsByChannel(key, executorWrapper.getGroup(), executorWrapper.getConsumer());
             if(assignments != null)
@@ -166,7 +156,7 @@ public class RedisAssignmentManager {
         }));
     }
 
-    private Assignments removeAssignmentsByChannel(final String baseChannel, final String group, final String consumer){
+    protected Assignments removeAssignmentsByChannel(final String baseChannel, final String group, final String consumer){
         String lockKey = RedisUtils.getChannelAssignmentsLockKey(baseChannel);
         Assignments assignments = null;
         RLock lock = getLock(lockKey);
@@ -186,12 +176,12 @@ public class RedisAssignmentManager {
         return assignments;
     }
 
-    private void onInitReassignments(String group, String consumer, Assignments assignments){
+    protected void onInitReassignments(String group, String consumer, Assignments assignments){
         Map<String, List<Integer>> groupAssignments = assignments.getAssignmentsOfGroup(group);
 
         String consumerGroup = RedisUtils.getConsumerGroupKey(group, consumer);
         if(groupAssignments.isEmpty()){
-            assignments.putConsumerAssignments(consumerGroup, Arrays.asList(IntStream.range(0, partitionsCount).boxed().toArray(Integer[]::new)));
+            assignments.putConsumerAssignments(consumerGroup, IntStream.range(0, partitionsCount).boxed().collect(Collectors.toList()));
         } else {
             int myPartitionsCount = partitionsCount / (groupAssignments.size() + 1);
             List<Integer> myPartitions = new ArrayList<>();
@@ -210,7 +200,7 @@ public class RedisAssignmentManager {
         }
     }
 
-    private void onCloseReassignments(String group, String consumer, Assignments assignments){
+    protected void onCloseReassignments(String group, String consumer, Assignments assignments){
         Map<String, List<Integer>> groupAssignments = assignments.getAssignmentsOfGroup(group);
 
         String consumerGroup = RedisUtils.getConsumerGroupKey(group, consumer);
@@ -224,7 +214,7 @@ public class RedisAssignmentManager {
                         .orElse(null);
 
                 int lastIndex = myPartitions.size() - 1;
-                if(toPartition != null) // toPartition is null case is the last instance
+                if(toPartition != null) // toPartition is null in case is the last instance of the group
                     assignments.addAssignmentToConsumer(toPartition.getKey(), myPartitions.get(lastIndex));
                 myPartitions.remove(lastIndex);
             }
@@ -259,73 +249,6 @@ public class RedisAssignmentManager {
         private final CancelChannelSubscription cancelSubscription;
         private final AssignmentExecutor assignmentExecutor;
         private final List<String> runningChannels = Collections.synchronizedList(new ArrayList<>());
-    }
-
-
-    public static void main(String[] args){
-        test1();
-        test2();
-        test3();
-    }
-
-    private static void test1(){
-        RedisAssignmentManager test = new RedisAssignmentManager(new ObjectMapper(), 5);
-        Assignments assignments = new Assignments();
-        assignments.setAssignmentsByConsumer(new HashMap<String, List<Integer>>(){{
-            put("group1-consumer1", Arrays.asList(0, 1));
-            put("group1-consumer2", Arrays.asList(2, 4, 3));
-        }});
-        test.onInitReassignments("group2", "consumer1", assignments);
-        Map<String, List<Integer>> verify = new HashMap<String, List<Integer>>(){{
-            put("group1-consumer1", Arrays.asList(0, 1));
-            put("group1-consumer2", Arrays.asList(2, 4, 3));
-            put("group2-consumer1", Arrays.asList(0, 1, 2, 3, 4));
-        }};
-
-        assert assignments.getAssignmentsByConsumer().equals(verify);
-        System.out.println("test1 OK");
-    }
-
-    private static void test2(){
-        RedisAssignmentManager test = new RedisAssignmentManager(new ObjectMapper(), 5);
-        Assignments assignments = new Assignments();
-        assignments.setAssignmentsByConsumer(new HashMap<String, List<Integer>>(){{
-            put("group1-consumer1", Arrays.asList(0, 1));
-            put("group1-consumer2", Arrays.asList(2, 4, 3));
-            put("group2-consumer1", Arrays.asList(0, 1, 2));
-            put("group2-consumer2", Arrays.asList(3, 4));
-        }});
-        test.onInitReassignments("group1", "consumer3", assignments);
-        Map<String, List<Integer>> verify = new HashMap<String, List<Integer>>(){{
-            put("group1-consumer1", Arrays.asList(0, 1));
-            put("group1-consumer2", Arrays.asList(2, 4));
-            put("group1-consumer3", Collections.singletonList(3));
-            put("group2-consumer1", Arrays.asList(0, 1, 2));
-            put("group2-consumer2", Arrays.asList(3, 4));
-        }};
-
-        assert assignments.getAssignmentsByConsumer().equals(verify);
-        System.out.println("test2 OK");
-    }
-
-    private static void test3(){
-        RedisAssignmentManager test = new RedisAssignmentManager(new ObjectMapper(), 5);
-        Assignments assignments = new Assignments();
-        assignments.setAssignmentsByConsumer(new HashMap<String, List<Integer>>(){{
-            put("group1-consumer1", Arrays.asList(0, 1));
-            put("group1-consumer2", Arrays.asList(2, 4, 3));
-            put("group2-consumer1", Arrays.asList(0, 1, 2));
-            put("group2-consumer2", Arrays.asList(3, 4));
-        }});
-        test.onCloseReassignments("group1", "consumer2", assignments);
-        Map<String, List<Integer>> verify = new HashMap<String, List<Integer>>(){{
-            put("group1-consumer1", Arrays.asList(0, 1, 3, 4, 2));
-            put("group2-consumer1", Arrays.asList(0, 1, 2));
-            put("group2-consumer2", Arrays.asList(3, 4));
-        }};
-
-        assert assignments.getAssignmentsByConsumer().equals(verify);
-        System.out.println("test3 OK");
     }
 
 }

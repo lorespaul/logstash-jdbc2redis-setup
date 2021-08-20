@@ -20,6 +20,7 @@ public class MixedConfiguration {
     private static final String REDIS_HOST = "localhost";
     private static final int REDIS_PORT = 6379;
     private static final int PARTITIONS_COUNT = 4;
+    private static final int SUBMISSIONS_PULL_SIZE = 20;
 
     @Bean
     public ObjectMapper initObjectMapper(){
@@ -30,7 +31,7 @@ public class MixedConfiguration {
     public RedisMessageBrokerImpl initMessageBroker(@Qualifier("redisTemplate") RedisTemplate<String, String> redisTemplate,
                                                     RedissonClient redissonClient,
                                                     ObjectMapper mapper){
-        return new RedisMessageBrokerImpl(redisTemplate, redissonClient, mapper, PARTITIONS_COUNT);
+        return new RedisMessageBrokerImpl(redisTemplate, redissonClient, mapper, SUBMISSIONS_PULL_SIZE, PARTITIONS_COUNT);
     }
 
     @Bean

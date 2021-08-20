@@ -22,12 +22,15 @@ public class RedisMessageBrokerImpl implements DisposableBean {
     private final int partitionsCount;
     private final List<RedisMultiSubscription> subscriptions = Collections.synchronizedList(new ArrayList<>());
 
-    public RedisMessageBrokerImpl(RedisTemplate<String, String> redisTemplate, RedissonClient redissonClient, ObjectMapper mapper, int partitionsCount){
+    public RedisMessageBrokerImpl(RedisTemplate<String, String> redisTemplate,
+                                  RedissonClient redissonClient,
+                                  ObjectMapper mapper,
+                                  int poolSize,
+                                  int partitionsCount){
         this.redisTemplate = redisTemplate;
         this.mapper = mapper;
-        this.assignmentManager = new RedisAssignmentManager(redisTemplate, redissonClient, mapper, 20, partitionsCount);
+        this.assignmentManager = new RedisAssignmentManager(redisTemplate, redissonClient, mapper, poolSize, partitionsCount);
         this.partitionsCount = partitionsCount;
-//        RedissonClients
     }
 
     @SneakyThrows
@@ -81,13 +84,9 @@ public class RedisMessageBrokerImpl implements DisposableBean {
 
     @Override
     public void destroy() {
-        log.info("Start closing assignments manager");
         assignmentManager.close();
-        log.info("Start destroy redis message broker: {}", subscriptions.size());
-        for(RedisMultiSubscription subscription : subscriptions){
+        for(RedisMultiSubscription subscription : subscriptions)
             subscription.close();
-            log.info("------------------------------------------------------------------");
-        }
         subscriptions.clear();
         log.info("End clearing subscriptions");
     }

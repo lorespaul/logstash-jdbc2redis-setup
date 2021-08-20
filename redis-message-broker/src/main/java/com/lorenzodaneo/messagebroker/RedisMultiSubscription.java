@@ -9,7 +9,6 @@ import io.lettuce.core.output.StatusOutput;
 import io.lettuce.core.protocol.CommandArgs;
 import io.lettuce.core.protocol.CommandKeyword;
 import io.lettuce.core.protocol.CommandType;
-import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.RedisSystemException;
 import org.springframework.data.redis.connection.stream.*;
@@ -43,20 +42,21 @@ public class RedisMultiSubscription {
     }
 
     public <T> void subscribe(final String channel, final String group, final String consumer, final Class<T> clazz, final Action<T> handler) throws Exception {
-        running.add(channel);
         try {
+            running.add(channel);
             handleCreateGroup(channel, group);
 
-            List<MapRecord<String, Object, Object>> records = getPendingRecords(channel, group, consumer);
-            while (!records.isEmpty() && !disposed.get() && running.contains(channel)) {
-                processRecords(records, channel, group, clazz, handler);
+            List<MapRecord<String, Object, Object>> records;
+            while (!disposed.get() && running.contains(channel)) {
                 records = getPendingRecords(channel, group, consumer);
+                if(records.isEmpty())
+                    break;
+                processRecords(records, channel, group, clazz, handler);
             }
 
-            records = getUnprocessedRecords(channel, group, consumer);
             while (!disposed.get() && running.contains(channel)) {
-                processRecords(records, channel, group, clazz, handler);
                 records = getUnprocessedRecords(channel, group, consumer);
+                processRecords(records, channel, group, clazz, handler);
             }
         } catch (Throwable e) {
             log.error("Subscription break stream read", e);
@@ -78,7 +78,6 @@ public class RedisMultiSubscription {
                 }));
     }
 
-    @SneakyThrows
     private <T> void processMessage(final String message, final RecordId recordId, final Class<T> clazz, final Action<T> handler){
         try{
             JavaType type = mapper.getTypeFactory().constructParametricType(MessageWrapper.class, clazz);
@@ -86,7 +85,7 @@ public class RedisMultiSubscription {
             handler.invoke(t.getMessage());
         } catch (Throwable e){
             log.debug("Message {} break stream read", recordId);
-            throw e;
+            throw new RuntimeException("Error on processMessage", e);
         }
     }
 
@@ -95,7 +94,7 @@ public class RedisMultiSubscription {
     }
 
     private List<MapRecord<String, Object, Object>> getUnprocessedRecords(final String channel, final String group, final String consumer) {
-        return getRecords(channel, group, consumer, ReadOffset.from(">"), StreamReadOptions.empty().block(Duration.ofMillis(RedisConstants.LONG_POLLING_TIMEOUT_MILLIS)));
+        return getRecords(channel, group, consumer, ReadOffset.from(">"), StreamReadOptions.empty().block(Duration.ofMillis(RedisConstants.BLOCK_TIMEOUT_MILLIS)));
     }
 
     private List<MapRecord<String, Object, Object>> getRecords(final String channel, final String group, final String consumer, ReadOffset readOffset, StreamReadOptions options) {
@@ -150,7 +149,7 @@ public class RedisMultiSubscription {
     public void close() {
         disposed.set(true);
         int breaker = 0;
-        int maxIteration = (RedisConstants.LONG_POLLING_TIMEOUT_MILLIS / 1000) + 1;
+        int maxIteration = (RedisConstants.BLOCK_TIMEOUT_MILLIS / 1000) + 1;
         while (!running.isEmpty()){
             RedisUtils.sleepASecond();
             if (breaker == maxIteration)

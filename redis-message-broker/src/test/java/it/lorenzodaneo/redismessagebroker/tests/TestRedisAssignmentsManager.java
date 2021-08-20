@@ -19,13 +19,13 @@ public class TestRedisAssignmentsManager {
         }
 
         @Override
-        protected void onInitReassignments(String group, String consumer, Assignments assignments) {
-            super.onInitReassignments(group, consumer, assignments);
+        protected void createConsumer(String group, String consumer, Assignments assignments) {
+            super.createConsumer(group, consumer, assignments);
         }
 
         @Override
-        protected void onCloseReassignments(String group, String consumer, Assignments assignments) {
-            super.onCloseReassignments(group, consumer, assignments);
+        protected void destroyConsumer(String group, String consumer, Assignments assignments) {
+            super.destroyConsumer(group, consumer, assignments);
         }
     }
 
@@ -41,7 +41,7 @@ public class TestRedisAssignmentsManager {
             put("group1-consumer1", Arrays.asList(0, 1));
             put("group1-consumer2", Arrays.asList(2, 4, 3));
         }});
-        redisAssignmentManager.onInitReassignments("group2", "consumer1", assignments);
+        redisAssignmentManager.createConsumer("group2", "consumer1", assignments);
         Map<String, List<Integer>> verify = new HashMap<String, List<Integer>>(){{
             put("group1-consumer1", Arrays.asList(0, 1));
             put("group1-consumer2", Arrays.asList(2, 4, 3));
@@ -61,7 +61,7 @@ public class TestRedisAssignmentsManager {
             put("group2-consumer1", Arrays.asList(0, 1, 2));
             put("group2-consumer2", Arrays.asList(3, 4));
         }});
-        redisAssignmentManager.onInitReassignments("group1", "consumer3", assignments);
+        redisAssignmentManager.createConsumer("group1", "consumer3", assignments);
         Map<String, List<Integer>> verify = new HashMap<String, List<Integer>>(){{
             put("group1-consumer1", Arrays.asList(0, 1));
             put("group1-consumer2", Arrays.asList(2, 4));
@@ -83,7 +83,7 @@ public class TestRedisAssignmentsManager {
             put("group2-consumer1", Arrays.asList(0, 1, 2));
             put("group2-consumer2", Arrays.asList(3, 4));
         }});
-        redisAssignmentManager.onCloseReassignments("group1", "consumer2", assignments);
+        redisAssignmentManager.destroyConsumer("group1", "consumer2", assignments);
         Map<String, List<Integer>> verify = new HashMap<String, List<Integer>>(){{
             put("group1-consumer1", Arrays.asList(0, 1, 3, 4, 2));
             put("group2-consumer1", Arrays.asList(0, 1, 2));

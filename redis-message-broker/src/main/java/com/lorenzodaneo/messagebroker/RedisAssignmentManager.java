@@ -4,7 +4,6 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
-import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
@@ -26,12 +25,15 @@ public class RedisAssignmentManager {
     private final RedissonClient redissonClient;
     private final ObjectMapper mapper;
     private final ExecutorService fixedExecutorService;
-    private final ExecutorService cachedExecutorService = Executors.newCachedThreadPool();
     private final int partitionsCount;
     private final Map<String, List<AssignmentExecutorWrapper>> streamConsumer = Collections.synchronizedMap(new HashMap<>());
     private final Timer timer = new Timer();
 
-    public RedisAssignmentManager(RedisTemplate<String, String> redisTemplate, RedissonClient redissonClient, ObjectMapper mapper, int poolSize, int partitionsCount){
+    public RedisAssignmentManager(RedisTemplate<String, String> redisTemplate,
+                                  RedissonClient redissonClient,
+                                  ObjectMapper mapper,
+                                  int poolSize,
+                                  int partitionsCount){
         this.redisTemplate = redisTemplate;
         this.redissonClient = redissonClient;
         this.mapper = mapper;
@@ -45,7 +47,7 @@ public class RedisAssignmentManager {
             streamConsumer.put(baseChannel, Collections.synchronizedList(new ArrayList<>()));
         AssignmentExecutorWrapper executorWrapper = new AssignmentExecutorWrapper(group, randomUUID().toString(), cancelSubscription, executor);
         streamConsumer.get(baseChannel).add(executorWrapper);
-        cachedExecutorService.submit(() -> initAssignmentsAndRebalance(baseChannel, executorWrapper));
+        initAssignmentsAndRebalance(baseChannel, executorWrapper);
     }
 
     private void start(){
@@ -101,38 +103,44 @@ public class RedisAssignmentManager {
         });
     }
 
+    // INIT ASSIGNMENTS
     protected void initAssignmentsAndRebalance(String baseChannel, AssignmentExecutorWrapper executorWrapper){
-            Assignments assignments = initAssignmentsByChannel(baseChannel, executorWrapper.getGroup(), executorWrapper.getConsumer());
-            if(assignments != null)
-                rebalanceAssignments(baseChannel, assignments, executorWrapper);
+        Assignments assignments = initAssignmentsByChannel(baseChannel, executorWrapper.getGroup(), executorWrapper.getConsumer());
+        rebalanceAssignments(baseChannel, assignments, executorWrapper);
     }
 
     protected Assignments initAssignmentsByChannel(final String baseChannel, final String group, final String consumer){
         String lockKey = RedisUtils.getChannelAssignmentsLockKey(baseChannel);
-        Assignments assignments = null;
-        RLock lock = getLock(lockKey);
+        RLock lock = null;
         try{
+            lock = getLock(lockKey);
+
             String channelAssignmentKey = RedisUtils.getChannelAssignmentsKey(baseChannel);
             String strAssignments = redisTemplate.opsForValue().get(channelAssignmentKey);
 
-            assignments = strAssignments != null && !strAssignments.isEmpty() ?
+            Assignments assignments = strAssignments != null && !strAssignments.isEmpty() ?
                     mapper.readValue(strAssignments, Assignments.class) :
                     new Assignments();
-            onInitReassignments(group, consumer, assignments);
+            createConsumer(group, consumer, assignments);
+            // TODO: get assignments brokenConsumers and xclaim to me matching the given partitions
+
             redisTemplate.opsForValue().set(channelAssignmentKey, mapper.writeValueAsString(assignments));
+            return assignments;
         } catch (Throwable e){
-            log.error("Error init assignments", e);
+            throw new RuntimeException(String.format("Error init assignments on group %s and consumer %s for channel %s", group, consumer, baseChannel), e);
         } finally {
-            lock.unlock();
+            if(lock != null)
+                lock.unlock();
         }
-        return assignments;
     }
 
+    // PULL ASSIGNMENTS
     protected void pullAssignmentsAndRebalance(){
         streamConsumer.forEach((key, value) -> value.forEach(executorWrapper -> {
             Assignments assignments = pullAssignmentsByChannel(key);
             if (assignments != null)
                 rebalanceAssignments(key, assignments, executorWrapper);
+            // TODO: check for inactive consumers and move to assignments brokenConsumers (remember to getLock)
         }));
     }
 
@@ -147,42 +155,48 @@ public class RedisAssignmentManager {
         return null;
     }
 
+    // REMOVE ASSIGNMENTS
     protected void removeAssignmentsAndRebalance(){
         streamConsumer.forEach((key, value) -> value.forEach(executorWrapper -> {
             Assignments assignments = removeAssignmentsByChannel(key, executorWrapper.getGroup(), executorWrapper.getConsumer());
             if(assignments != null)
                 rebalanceAssignments(key, assignments, executorWrapper);
-            log.info("Stop for channel {}, group {} and consumer {}", key, executorWrapper.getGroup(), executorWrapper.getConsumer());
+            log.info("Stop group {} and consumer {} for channel {}", executorWrapper.getGroup(), executorWrapper.getConsumer(), key);
         }));
     }
 
     protected Assignments removeAssignmentsByChannel(final String baseChannel, final String group, final String consumer){
         String lockKey = RedisUtils.getChannelAssignmentsLockKey(baseChannel);
-        Assignments assignments = null;
-        RLock lock = getLock(lockKey);
+        RLock lock = null;
         try{
+            lock = getLock(lockKey);
 
             String channelAssignmentsKey = RedisUtils.getChannelAssignmentsKey(baseChannel);
             String strAssignments = redisTemplate.opsForValue().get(channelAssignmentsKey);
-            assignments = mapper.readValue(strAssignments, Assignments.class);
-            onCloseReassignments(group, consumer, assignments);
+
+            Assignments assignments = mapper.readValue(strAssignments, Assignments.class);
+            destroyConsumer(group, consumer, assignments);
 
             redisTemplate.opsForValue().set(channelAssignmentsKey, mapper.writeValueAsString(assignments));
+            return assignments;
         } catch (Throwable e){
-            log.error("Error removing assignments", e);
+            log.error("Error removing assignments on group {} and consumer {} for channel {}", group, consumer, baseChannel, e);
         } finally {
-            lock.unlock();
+            if(lock != null)
+                lock.unlock();
         }
-        return assignments;
+        return null;
     }
 
-    protected void onInitReassignments(String group, String consumer, Assignments assignments){
+    // MANAGE CONSUMER ASSIGNMENTS
+    protected void createConsumer(String group, String consumer, Assignments assignments){
         Map<String, List<Integer>> groupAssignments = assignments.getAssignmentsOfGroup(group);
 
         String consumerGroup = RedisUtils.getConsumerGroupKey(group, consumer);
         if(groupAssignments.isEmpty()){
             assignments.putConsumerAssignments(consumerGroup, IntStream.range(0, partitionsCount).boxed().collect(Collectors.toList()));
         } else {
+            // TODO: manage case when not all partitions are already assigned
             int myPartitionsCount = partitionsCount / (groupAssignments.size() + 1);
             List<Integer> myPartitions = new ArrayList<>();
 
@@ -200,7 +214,7 @@ public class RedisAssignmentManager {
         }
     }
 
-    protected void onCloseReassignments(String group, String consumer, Assignments assignments){
+    protected void destroyConsumer(String group, String consumer, Assignments assignments){
         Map<String, List<Integer>> groupAssignments = assignments.getAssignmentsOfGroup(group);
 
         String consumerGroup = RedisUtils.getConsumerGroupKey(group, consumer);
@@ -222,8 +236,8 @@ public class RedisAssignmentManager {
         }
     }
 
-    @SneakyThrows
-    private RLock getLock(String lockKey) {
+    // MANAGE LOCK
+    private RLock getLock(String lockKey) throws Exception {
         RLock lock = redissonClient.getLock(lockKey);
         try{
             if(lock.tryLock(60, TimeUnit.SECONDS))
@@ -236,7 +250,6 @@ public class RedisAssignmentManager {
 
     public void close(){
         timer.cancel();
-        log.info("End cancel timer assignments");
         removeAssignmentsAndRebalance();
         log.info("End removing assignments");
     }

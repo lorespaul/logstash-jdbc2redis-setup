@@ -24,13 +24,7 @@ public class Assignments {
         return getAssignmentsOfGroup(group)
                 .entrySet()
                 .stream()
-                .min((x, y) -> {
-                    if(x.getValue().size() > y.getValue().size())
-                        return 1;
-                    else if(x.getValue().size() < y.getValue().size())
-                        return -1;
-                    return 0;
-                })
+                .min(consumerAssignmentsSizeComparator())
                 .map(e -> new AbstractMap.SimpleEntry<>(e.getKey(), new ArrayList<>(e.getValue())));
     }
 
@@ -38,13 +32,7 @@ public class Assignments {
         return getAssignmentsOfGroup(group)
                 .entrySet()
                 .stream()
-                .max((x, y) -> {
-                    if(x.getValue().size() > y.getValue().size())
-                        return 1;
-                    else if(x.getValue().size() < y.getValue().size())
-                        return -1;
-                    return 0;
-                })
+                .max(consumerAssignmentsSizeComparator())
                 .map(e -> new AbstractMap.SimpleEntry<>(e.getKey(), new ArrayList<>(e.getValue())));
     }
 
@@ -66,6 +54,16 @@ public class Assignments {
 
     public void removeConsumerAssignment(String consumer){
         getAssignmentsByConsumer().remove(consumer);
+    }
+
+    private Comparator<Map.Entry<String, List<Integer>>> consumerAssignmentsSizeComparator(){
+        return (x, y) -> {
+            if(x.getValue().size() > y.getValue().size())
+                return 1;
+            else if(x.getValue().size() < y.getValue().size())
+                return -1;
+            return 0;
+        };
     }
 
 }

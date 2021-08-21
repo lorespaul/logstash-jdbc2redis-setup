@@ -3,6 +3,8 @@ package it.lorenzodaneo.redismessagebroker.tests;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lorenzodaneo.messagebroker.Assignments;
 import com.lorenzodaneo.messagebroker.RedisConsumerAssignmentsManager;
+import com.lorenzodaneo.messagebroker.RedisUtils;
+import it.lorenzodaneo.redismessagebroker.tests.mixed.TestConstants;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.*;
 
@@ -14,7 +16,7 @@ public class TestRedisConsumerAssignmentsManager {
 
     private static class RedisConsumerAssignmentsManagerWrapper extends RedisConsumerAssignmentsManager {
         public RedisConsumerAssignmentsManagerWrapper() {
-            super(null, null, new ObjectMapper(), 20, 5);
+            super(null, null, new ObjectMapper(), TestConstants.APPLICATION_NAME, 20, TestConstants.PARTITIONS);
         }
 
         @Override
@@ -37,14 +39,14 @@ public class TestRedisConsumerAssignmentsManager {
     public void testAddNewGroup(){
         Assignments assignments = new Assignments();
         assignments.setAssignmentsByConsumer(new HashMap<String, List<Integer>>(){{
-            put("group1-consumer1", Arrays.asList(0, 1));
-            put("group1-consumer2", Arrays.asList(2, 4, 3));
+            put(RedisUtils.getConsumerGroupKey("group1", "consumer1"), Arrays.asList(0, 1));
+            put(RedisUtils.getConsumerGroupKey("group1", "consumer2"), Arrays.asList(2, 4, 3));
         }});
         consumerAssignmentsManager.createConsumer("group2", "consumer1", assignments);
         Map<String, List<Integer>> verify = new HashMap<String, List<Integer>>(){{
-            put("group1-consumer1", Arrays.asList(0, 1));
-            put("group1-consumer2", Arrays.asList(2, 4, 3));
-            put("group2-consumer1", Arrays.asList(0, 1, 2, 3, 4));
+            put(RedisUtils.getConsumerGroupKey("group1", "consumer1"), Arrays.asList(0, 1));
+            put(RedisUtils.getConsumerGroupKey("group1", "consumer2"), Arrays.asList(2, 4, 3));
+            put(RedisUtils.getConsumerGroupKey("group2", "consumer1"), Arrays.asList(0, 1, 2, 3, 4));
         }};
 
         Assertions.assertThat(assignments.getAssignmentsByConsumer()).isEqualTo(verify);
@@ -54,18 +56,18 @@ public class TestRedisConsumerAssignmentsManager {
     public void testAddConsumerToExistentGroup(){
         Assignments assignments = new Assignments();
         assignments.setAssignmentsByConsumer(new HashMap<String, List<Integer>>(){{
-            put("group1-consumer1", Arrays.asList(0, 1));
-            put("group1-consumer2", Arrays.asList(2, 4, 3));
-            put("group2-consumer1", Arrays.asList(0, 1, 2));
-            put("group2-consumer2", Arrays.asList(3, 4));
+            put(RedisUtils.getConsumerGroupKey("group1", "consumer1"), Arrays.asList(0, 1));
+            put(RedisUtils.getConsumerGroupKey("group1", "consumer2"), Arrays.asList(2, 4, 3));
+            put(RedisUtils.getConsumerGroupKey("group2", "consumer1"), Arrays.asList(0, 1, 2));
+            put(RedisUtils.getConsumerGroupKey("group2", "consumer2"), Arrays.asList(3, 4));
         }});
         consumerAssignmentsManager.createConsumer("group1", "consumer3", assignments);
         Map<String, List<Integer>> verify = new HashMap<String, List<Integer>>(){{
-            put("group1-consumer1", Arrays.asList(0, 1));
-            put("group1-consumer2", Arrays.asList(2, 4));
-            put("group1-consumer3", Collections.singletonList(3));
-            put("group2-consumer1", Arrays.asList(0, 1, 2));
-            put("group2-consumer2", Arrays.asList(3, 4));
+            put(RedisUtils.getConsumerGroupKey("group1", "consumer1"), Arrays.asList(0, 1));
+            put(RedisUtils.getConsumerGroupKey("group1", "consumer2"), Arrays.asList(2, 4));
+            put(RedisUtils.getConsumerGroupKey("group1", "consumer3"), Collections.singletonList(3));
+            put(RedisUtils.getConsumerGroupKey("group2", "consumer1"), Arrays.asList(0, 1, 2));
+            put(RedisUtils.getConsumerGroupKey("group2", "consumer2"), Arrays.asList(3, 4));
         }};
 
         Assertions.assertThat(assignments.getAssignmentsByConsumer()).isEqualTo(verify);
@@ -75,16 +77,16 @@ public class TestRedisConsumerAssignmentsManager {
     public void testRemoveConsumerFromGroup(){
         Assignments assignments = new Assignments();
         assignments.setAssignmentsByConsumer(new HashMap<String, List<Integer>>(){{
-            put("group1-consumer1", Arrays.asList(0, 1));
-            put("group1-consumer2", Arrays.asList(2, 4, 3));
-            put("group2-consumer1", Arrays.asList(0, 1, 2));
-            put("group2-consumer2", Arrays.asList(3, 4));
+            put(RedisUtils.getConsumerGroupKey("group1", "consumer1"), Arrays.asList(0, 1));
+            put(RedisUtils.getConsumerGroupKey("group1", "consumer2"), Arrays.asList(2, 4, 3));
+            put(RedisUtils.getConsumerGroupKey("group2", "consumer1"), Arrays.asList(0, 1, 2));
+            put(RedisUtils.getConsumerGroupKey("group2", "consumer2"), Arrays.asList(3, 4));
         }});
         consumerAssignmentsManager.destroyConsumer("group1", "consumer2", assignments);
         Map<String, List<Integer>> verify = new HashMap<String, List<Integer>>(){{
-            put("group1-consumer1", Arrays.asList(0, 1, 3, 4, 2));
-            put("group2-consumer1", Arrays.asList(0, 1, 2));
-            put("group2-consumer2", Arrays.asList(3, 4));
+            put(RedisUtils.getConsumerGroupKey("group1", "consumer1"), Arrays.asList(0, 1, 3, 4, 2));
+            put(RedisUtils.getConsumerGroupKey("group2", "consumer1"), Arrays.asList(0, 1, 2));
+            put(RedisUtils.getConsumerGroupKey("group2", "consumer2"), Arrays.asList(3, 4));
         }};
 
         Assertions.assertThat(assignments.getAssignmentsByConsumer()).isEqualTo(verify);

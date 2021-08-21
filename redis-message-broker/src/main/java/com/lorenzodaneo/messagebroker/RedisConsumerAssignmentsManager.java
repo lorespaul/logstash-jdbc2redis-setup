@@ -2,6 +2,8 @@ package com.lorenzodaneo.messagebroker;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
@@ -24,31 +26,28 @@ public class RedisConsumerAssignmentsManager {
     private final ObjectMapper mapper;
     private final ExecutorService fixedExecutorService;
     private final int partitionsCount;
+    private final String applicationName;
     private final Map<String, List<AssignmentExecutorWrapper>> streamConsumers = Collections.synchronizedMap(new HashMap<>());
     private final Timer timer = new Timer();
 
     public RedisConsumerAssignmentsManager(RedisTemplate<String, String> redisTemplate,
                                            RedissonClient redissonClient,
                                            ObjectMapper mapper,
+                                           String applicationName,
                                            int poolSize,
                                            int partitionsCount){
         this.redisTemplate = redisTemplate;
         this.redissonClient = redissonClient;
         this.mapper = mapper;
+        this.applicationName = applicationName;
         this.fixedExecutorService = Executors.newFixedThreadPool(poolSize);
         this.partitionsCount = partitionsCount;
         this.start();
     }
 
-    public Map<String, List<AssignmentExecutorWrapper>> getStreamConsumers(){
+    public List<String> getStreams(){
         synchronized (streamConsumers){
-            return streamConsumers
-                    .entrySet()
-                    .stream()
-                    .collect(Collectors.toMap(
-                            Map.Entry::getKey,
-                            e -> new ArrayList<>(e.getValue())
-                    ));
+            return new ArrayList<>(streamConsumers.keySet());
         }
     }
 
@@ -94,7 +93,6 @@ public class RedisConsumerAssignmentsManager {
 
         stoppingPartitions.forEach(n -> {
             String channel = RedisUtils.getPartitionedChannel(baseChannel, n);
-            executorWrapper.getRunningChannels().remove(channel);
             executorWrapper.getCancelSubscription().cancel(channel);
         });
 
@@ -104,7 +102,8 @@ public class RedisConsumerAssignmentsManager {
             fixedExecutorService.submit(() -> {
                 try {
                     executorWrapper.getAssignmentExecutor().executeAssignment(channel, executorWrapper.getGroup(), executorWrapper.getConsumer());
-                } catch (Exception e) {
+                } catch (Exception ignored) {
+                } finally {
                     executorWrapper.getRunningChannels().remove(channel);
                 }
             });
@@ -118,12 +117,11 @@ public class RedisConsumerAssignmentsManager {
     }
 
     protected Assignments initAssignmentsByChannel(final String baseChannel, final String group, final String consumer){
-        String lockKey = RedisUtils.getChannelAssignmentsLockKey(baseChannel);
         RLock lock = null;
         try{
-            lock = getLock(lockKey);
+            lock = getLock(baseChannel);
 
-            String channelAssignmentKey = RedisUtils.getChannelAssignmentsKey(baseChannel);
+            String channelAssignmentKey = RedisUtils.getChannelAssignmentsKey(applicationName, baseChannel);
             String strAssignments = redisTemplate.opsForValue().get(channelAssignmentKey);
 
             Assignments assignments = strAssignments != null && !strAssignments.isEmpty() ?
@@ -153,7 +151,7 @@ public class RedisConsumerAssignmentsManager {
     }
 
     protected Assignments pullAssignmentsByChannel(final String baseChannel){
-        String channelAssignmentsKey = RedisUtils.getChannelAssignmentsKey(baseChannel);
+        String channelAssignmentsKey = RedisUtils.getChannelAssignmentsKey(applicationName, baseChannel);
         String strAssignments = redisTemplate.opsForValue().get(channelAssignmentsKey);
         if(strAssignments != null && !strAssignments.isEmpty()){
             try {
@@ -176,12 +174,11 @@ public class RedisConsumerAssignmentsManager {
     }
 
     protected Assignments removeAssignmentsByChannel(final String baseChannel, final String group, final String consumer){
-        String lockKey = RedisUtils.getChannelAssignmentsLockKey(baseChannel);
         RLock lock = null;
         try{
-            lock = getLock(lockKey);
+            lock = getLock(baseChannel);
 
-            String channelAssignmentsKey = RedisUtils.getChannelAssignmentsKey(baseChannel);
+            String channelAssignmentsKey = RedisUtils.getChannelAssignmentsKey(applicationName, baseChannel);
             String strAssignments = redisTemplate.opsForValue().get(channelAssignmentsKey);
 
             Assignments assignments = mapper.readValue(strAssignments, Assignments.class);
@@ -244,13 +241,14 @@ public class RedisConsumerAssignmentsManager {
     }
 
     // MANAGE LOCK
-    private RLock getLock(String lockKey) throws Exception {
+    private RLock getLock(String baseChannel) throws Exception {
+        String lockKey = RedisUtils.getChannelAssignmentsLockKey(applicationName, baseChannel);
         RLock lock = redissonClient.getLock(lockKey);
         try{
             if(lock.tryLock(30, TimeUnit.SECONDS))
                 return lock;
         } catch (Exception e){
-            log.error("Error during lock acquire", e);
+            log.error("Error during lock acquire in manager for key {}", lockKey, e);
         }
         throw new Exception(String.format("Can't acquire lock for key %s%n", lockKey));
     }
@@ -259,6 +257,16 @@ public class RedisConsumerAssignmentsManager {
         timer.cancel();
         removeAssignmentsAndRebalance();
         log.info("End removing assignments");
+    }
+
+    @Getter
+    @AllArgsConstructor
+    private static class AssignmentExecutorWrapper {
+        private final String group;
+        private final String consumer;
+        private final CancelChannelSubscription cancelSubscription;
+        private final AssignmentExecutor assignmentExecutor;
+        private final List<String> runningChannels = Collections.synchronizedList(new ArrayList<>());
     }
 
 }

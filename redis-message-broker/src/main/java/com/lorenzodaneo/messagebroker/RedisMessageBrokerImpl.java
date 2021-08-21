@@ -26,12 +26,18 @@ public class RedisMessageBrokerImpl implements DisposableBean {
     public RedisMessageBrokerImpl(RedisTemplate<String, String> redisTemplate,
                                   RedissonClient redissonClient,
                                   ObjectMapper mapper,
+                                  String applicationName,
                                   int poolSize,
                                   int partitionsCount){
         this.redisTemplate = redisTemplate;
         this.mapper = mapper;
-        this.consumerAssignmentsManager = new RedisConsumerAssignmentsManager(redisTemplate, redissonClient, mapper, poolSize, partitionsCount);
-        this.assignmentsCoordinator = new RedisAssignmentsCoordinator(this.consumerAssignmentsManager::getStreamConsumers, redissonClient);
+        this.consumerAssignmentsManager = new RedisConsumerAssignmentsManager(
+                redisTemplate, redissonClient, mapper, applicationName, poolSize, partitionsCount
+        );
+        this.assignmentsCoordinator = new RedisAssignmentsCoordinator(
+                this.consumerAssignmentsManager::getStreams, redisTemplate, redissonClient, mapper, applicationName, partitionsCount
+        );
+        this.assignmentsCoordinator.start();
         this.partitionsCount = partitionsCount;
     }
 

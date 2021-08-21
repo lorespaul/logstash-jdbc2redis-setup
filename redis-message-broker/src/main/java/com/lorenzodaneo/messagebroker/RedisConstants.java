@@ -6,4 +6,6 @@ public class RedisConstants {
     public static final String KEY_MESSAGE = "message";
     public static final String QUEUE = "queue:";
     public static final String TOPIC = "topic:";
+
+    public static final String CONSUMER_GROUP_DIVIDER = "$$";
 }

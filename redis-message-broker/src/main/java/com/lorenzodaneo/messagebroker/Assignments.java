@@ -1,5 +1,6 @@
 package com.lorenzodaneo.messagebroker;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -12,6 +13,17 @@ public class Assignments {
     @Setter
     private Map<String, List<Integer>> assignmentsByConsumer = new HashMap<>();
 
+    @JsonIgnore
+    public List<String> getConsumerGroupsByPartitionedChannel(int partition){
+        return getAssignmentsByConsumer()
+                .entrySet()
+                .stream()
+                .filter(e -> e.getValue().contains(partition))
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toList());
+    }
+
+    @JsonIgnore
     public Map<String, List<Integer>> getAssignmentsOfGroup(String group){
         return getAssignmentsByConsumer()
                 .entrySet()
@@ -20,6 +32,7 @@ public class Assignments {
                 .collect(Collectors.toMap(Map.Entry::getKey, e -> new ArrayList<>(e.getValue())));
     }
 
+    @JsonIgnore
     public Optional<Map.Entry<String, List<Integer>>> getAssignmentWithMinSizeOfGroup(String group){
         return getAssignmentsOfGroup(group)
                 .entrySet()
@@ -28,6 +41,7 @@ public class Assignments {
                 .map(e -> new AbstractMap.SimpleEntry<>(e.getKey(), new ArrayList<>(e.getValue())));
     }
 
+    @JsonIgnore
     public Optional<Map.Entry<String, List<Integer>>> getAssignmentWithMaxSizeOfGroup(String group){
         return getAssignmentsOfGroup(group)
                 .entrySet()

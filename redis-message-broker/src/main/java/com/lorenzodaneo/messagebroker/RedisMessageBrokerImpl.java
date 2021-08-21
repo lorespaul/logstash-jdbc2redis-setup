@@ -18,7 +18,8 @@ public class RedisMessageBrokerImpl implements DisposableBean {
 
     private final RedisTemplate<String, String> redisTemplate;
     private final ObjectMapper mapper;
-    private final RedisAssignmentManager assignmentManager;
+    private final RedisConsumerAssignmentsManager consumerAssignmentsManager;
+    private final RedisAssignmentsCoordinator assignmentsCoordinator;
     private final int partitionsCount;
     private final List<RedisMultiSubscription> subscriptions = Collections.synchronizedList(new ArrayList<>());
 
@@ -29,7 +30,8 @@ public class RedisMessageBrokerImpl implements DisposableBean {
                                   int partitionsCount){
         this.redisTemplate = redisTemplate;
         this.mapper = mapper;
-        this.assignmentManager = new RedisAssignmentManager(redisTemplate, redissonClient, mapper, poolSize, partitionsCount);
+        this.consumerAssignmentsManager = new RedisConsumerAssignmentsManager(redisTemplate, redissonClient, mapper, poolSize, partitionsCount);
+        this.assignmentsCoordinator = new RedisAssignmentsCoordinator(this.consumerAssignmentsManager::getStreamConsumers, redissonClient);
         this.partitionsCount = partitionsCount;
     }
 
@@ -64,10 +66,10 @@ public class RedisMessageBrokerImpl implements DisposableBean {
         subscribe(RedisConstants.TOPIC + channel, group, clazz, handler);
     }
 
-    private <T> void subscribe(final String channel, final String group, final Class<T> clazz, final Action<T> handler){
+    private <T> void subscribe(final String baseChannel, final String group, final Class<T> clazz, final Action<T> handler){
         final RedisMultiSubscription subscription = new RedisMultiSubscription(redisTemplate, mapper);
-        assignmentManager.addStreamConsumer(
-                channel,
+        consumerAssignmentsManager.addStreamConsumer(
+                baseChannel,
                 group,
                 (c) -> {
                     subscription.unsubscribe(c);
@@ -84,9 +86,12 @@ public class RedisMessageBrokerImpl implements DisposableBean {
 
     @Override
     public void destroy() {
-        assignmentManager.close();
-        for(RedisMultiSubscription subscription : subscriptions)
-            subscription.close();
+        consumerAssignmentsManager.close();
+        assignmentsCoordinator.close();
+        synchronized (subscriptions){
+            for(RedisMultiSubscription subscription : subscriptions)
+                subscription.close();
+        }
         subscriptions.clear();
         log.info("End clearing subscriptions");
     }

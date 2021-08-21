@@ -1,19 +1,13 @@
 package com.lorenzodaneo.messagebroker;
 
-import lombok.SneakyThrows;
-
 public class RedisUtils {
 
     public static String getQueueStreamKey(String channel, int partition){
-        return RedisConstants.QUEUE + getStreamKey(channel, partition);
+        return RedisConstants.QUEUE + getPartitionedChannel(channel, partition);
     }
 
     public static String getTopicStreamKey(String channel, int partition){
-        return RedisConstants.TOPIC + getStreamKey(channel, partition);
-    }
-
-    private static String getStreamKey(String channel, int partition){
-        return channel + "-" + partition;
+        return RedisConstants.TOPIC + getPartitionedChannel(channel, partition);
     }
 
     public static String getConsumerGroupKey(String group, String consumer){
@@ -35,11 +29,6 @@ public class RedisUtils {
 
     public static String getChannelAssignmentsLockKey(String channel){
         return String.format("lock:assignments:%s", channel);
-    }
-
-    @SneakyThrows
-    public static void sleepASecond() {
-        Thread.sleep(1000);
     }
 
 }

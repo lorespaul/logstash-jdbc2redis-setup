@@ -75,15 +75,15 @@ public class TestRedisSubscribeAfterSend {
         });
 
         List<TestMessage> testMessages = futureTestMessageQueue.get();
-        assert receivedCounterQueue == testMessages.size();
+        Assertions.assertEquals(receivedCounterQueue, testMessages.size());
 
         for(int i = 0; i < testMessages.size(); i++){
             TestMessage fromQueue = testMessages.get(i);
             TestMessage find = testMessagesQueue.get(i);
 
-            assert find.getId().equals(fromQueue.getId());
-            assert find.getType().equals(fromQueue.getType());
-            assert find.getDescription().equals(fromQueue.getDescription());
+            Assertions.assertEquals(find.getId(), fromQueue.getId());
+            Assertions.assertEquals(find.getType(), fromQueue.getType());
+            Assertions.assertEquals(find.getDescription(), fromQueue.getDescription());
         }
     }
 
@@ -119,15 +119,15 @@ public class TestRedisSubscribeAfterSend {
             });
 
             List<TestMessage> testMessages = futureTestMessageTopic.get();
-            assert group.getReceivedCounter() == testMessages.size();
+            Assertions.assertEquals(group.getReceivedCounter(), testMessages.size());
 
             for(int i = 0; i < testMessages.size(); i++){
                 TestMessage fromTopic = testMessages.get(i);
                 TestMessage find = testMessagesTopic.get(i);
 
-                assert find.getId().equals(fromTopic.getId());
-                assert find.getType().equals(fromTopic.getType());
-                assert find.getDescription().equals(fromTopic.getDescription());
+                Assertions.assertEquals(find.getId(), fromTopic.getId());
+                Assertions.assertEquals(find.getType(), fromTopic.getType());
+                Assertions.assertEquals(find.getDescription(), fromTopic.getDescription());
             }
         }
     }

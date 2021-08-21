@@ -100,10 +100,10 @@ public class TestRedisSubscribeBeforeSend {
         messageBroker.sendMessageToQueue(TestConstants.CHANNEL_NAME, testMessageQueue);
 
         TestMessage fromQueue = futureTestMessageQueue.get();
-        assert testMessageQueue.getId().equals(fromQueue.getId());
-        assert testMessageQueue.getType().equals(fromQueue.getType());
-        assert testMessageQueue.getDescription().equals(fromQueue.getDescription());
-        assert receivedCounterQueue == 1;
+        Assertions.assertEquals(testMessageQueue.getId(), fromQueue.getId());
+        Assertions.assertEquals(testMessageQueue.getType(), fromQueue.getType());
+        Assertions.assertEquals(testMessageQueue.getDescription(), fromQueue.getDescription());
+        Assertions.assertEquals(receivedCounterQueue, 1);
     }
 
 
@@ -116,11 +116,11 @@ public class TestRedisSubscribeBeforeSend {
         for(Future<TestMessage> f : futureTestMessagesTopic){
             TestMessage fromTopic = f.get();
 
-            assert testMessageTopic.getId().equals(fromTopic.getId());
-            assert testMessageTopic.getType().equals(fromTopic.getType());
-            assert testMessageTopic.getDescription().equals(fromTopic.getDescription());
+            Assertions.assertEquals(testMessageTopic.getId(), fromTopic.getId());
+            Assertions.assertEquals(testMessageTopic.getType(), fromTopic.getType());
+            Assertions.assertEquals(testMessageTopic.getDescription(), fromTopic.getDescription());
         }
-        assert receivedCounterTopic == groupsLength;
+        Assertions.assertEquals(receivedCounterTopic, groupsLength);
     }
 
 }

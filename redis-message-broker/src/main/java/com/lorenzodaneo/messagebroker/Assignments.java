@@ -11,7 +11,6 @@ public class Assignments {
     @Getter
     @Setter
     private Map<String, List<Integer>> assignmentsByConsumer = new HashMap<>();
-    // TODO: add brokenConsumers
 
     public Map<String, List<Integer>> getAssignmentsOfGroup(String group){
         return getAssignmentsByConsumer()

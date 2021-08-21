@@ -9,6 +9,7 @@ import io.lettuce.core.output.StatusOutput;
 import io.lettuce.core.protocol.CommandArgs;
 import io.lettuce.core.protocol.CommandKeyword;
 import io.lettuce.core.protocol.CommandType;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.RedisSystemException;
 import org.springframework.data.redis.connection.stream.*;
@@ -110,7 +111,7 @@ public class RedisMultiSubscription {
 
             return records;
         } catch (Exception e){
-            log.error("RedisException, probably the cause is the block on stream read consequent to server shutdown");
+            log.warn("RedisException, probably the cause is the block on stream read consequent to server shutdown");
         }
         return new ArrayList<>();
     }
@@ -151,11 +152,16 @@ public class RedisMultiSubscription {
         int breaker = 0;
         int maxIteration = (RedisConstants.BLOCK_TIMEOUT_MILLIS / 1000) + 1;
         while (!running.isEmpty()){
-            RedisUtils.sleepASecond();
             if (breaker == maxIteration)
                 break;
+            sleepASecond();
             breaker++;
         }
+    }
+
+    @SneakyThrows
+    public static void sleepASecond() {
+        Thread.sleep(1000);
     }
 
     @Override

@@ -53,7 +53,7 @@ public class TestRedisAssignmentsCoordinator {
                     testInstance.redissonClient,
                     testInstance.mapper,
                     TestConstants.APPLICATION_NAME,
-                    TestConstants.PARTITIONS
+                    TestConstants.PARTITIONS_COUNT_2
             );
         }
 
@@ -67,20 +67,22 @@ public class TestRedisAssignmentsCoordinator {
     public void init(){
         String group = "default";
         String consumer = "consumer1";
-        List<Integer> partitions = IntStream.range(0, TestConstants.PARTITIONS).boxed().collect(Collectors.toList());
+        List<Integer> partitions = IntStream.range(0, TestConstants.PARTITIONS_COUNT_2).boxed().collect(Collectors.toList());
         Assignments assignments = new Assignments();
         assignments.setAssignmentsByConsumer(new HashMap<String, List<Integer>>(){{
             put(RedisUtils.getConsumerGroupKey(group, consumer), partitions);
         }});
         uploadAssignments(assignments);
 
-        String channelPartitioned = QUEUE_CHANNEL + "-" + Math.abs(UUID.randomUUID().hashCode() % TestConstants.PARTITIONS);
-        messageBroker.sendMessageToQueue(TestConstants.CHANNEL_NAME, new TestMessage(UUID.randomUUID().toString(), "Test pending queue", "Test pending queue description"));
+        String uuid = UUID.randomUUID().toString();
+        String channelPartitioned = QUEUE_CHANNEL + "-" + Math.abs(uuid.hashCode() % TestConstants.PARTITIONS_COUNT_2);
+        messageBroker.sendMessageToQueue(TestConstants.CHANNEL_NAME, new TestMessage(uuid, "Test pending queue", "Test pending queue description"));
         // read but not ack
         try{
             log.info("Create group {} for channel {}", group, channelPartitioned);
             redisTemplate.opsForStream().createGroup(channelPartitioned, ReadOffset.from("0"), group);
         } catch (Exception ignored){}
+
         redisTemplate.opsForStream().read(
                 Consumer.from(group, consumer),
                 StreamReadOptions.empty().block(Duration.ofMillis(RedisConstants.BLOCK_TIMEOUT_MILLIS)),

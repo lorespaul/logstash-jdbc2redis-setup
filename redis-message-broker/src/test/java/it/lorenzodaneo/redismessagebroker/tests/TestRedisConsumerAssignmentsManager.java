@@ -16,7 +16,7 @@ public class TestRedisConsumerAssignmentsManager {
 
     private static class RedisConsumerAssignmentsManagerWrapper extends RedisConsumerAssignmentsManager {
         public RedisConsumerAssignmentsManagerWrapper() {
-            super(null, null, new ObjectMapper(), TestConstants.APPLICATION_NAME, 20, TestConstants.PARTITIONS);
+            super(null, null, new ObjectMapper(), TestConstants.APPLICATION_NAME, 20, TestConstants.PARTITIONS_COUNT);
         }
 
         @Override

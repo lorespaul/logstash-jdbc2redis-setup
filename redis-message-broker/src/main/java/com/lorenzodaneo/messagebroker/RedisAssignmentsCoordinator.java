@@ -11,14 +11,12 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.connection.stream.Consumer;
 import org.springframework.data.redis.connection.stream.PendingMessage;
 import org.springframework.data.redis.connection.stream.PendingMessages;
-import org.springframework.data.redis.connection.stream.StreamInfo;
 import org.springframework.data.redis.core.RedisOperations;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.SessionCallback;
 
 import java.util.*;
-import java.util.concurrent.Callable;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -32,6 +30,7 @@ public class RedisAssignmentsCoordinator {
     private final ObjectMapper mapper;
     private final String applicationName;
     private final List<Integer> partitions;
+    private final ExecutorService lockExecutorService;
     private Timer timer = null;
     private RLock applicationCoordinatorLock = null;
 
@@ -47,6 +46,7 @@ public class RedisAssignmentsCoordinator {
         this.mapper = mapper;
         this.applicationName = applicationName;
         this.partitions = IntStream.range(0, partitionsCount).boxed().collect(Collectors.toList());
+        this.lockExecutorService = Executors.newSingleThreadExecutor();
     }
 
     public void start(){
@@ -75,7 +75,8 @@ public class RedisAssignmentsCoordinator {
                 if(strAssignments != null && !strAssignments.isEmpty()){
                     Assignments assignments = mapper.readValue(strAssignments, Assignments.class);
                     List<ChannelGroupPendingMessages> channelGroupPendingMessages = findPendingMessages(baseChannel, assignments);
-                    findInactiveConsumers(channelGroupPendingMessages);
+                    List<ConsumerPendingMessages> consumerPendingMessages = findInactiveConsumers(channelGroupPendingMessages);
+
                 }
             } catch (Exception e){
                 log.warn("Exception during execution of coordinator for channel {}", baseChannel, e);
@@ -102,10 +103,10 @@ public class RedisAssignmentsCoordinator {
                                     null
                             ))
                             .collect(Collectors.toList());
-                    consumerPendingMessages.forEach(cg -> redisTemplate
+                    consumerPendingMessages.forEach(cg -> redisOperations
                             .opsForStream()
                             .pending(
-                                    cg.getChannel(),
+                                    (K)cg.getChannel(),
                                     Consumer.from(cg.getGroup(), cg.getConsumer())
                             ));
                 }
@@ -129,36 +130,32 @@ public class RedisAssignmentsCoordinator {
                     .map(PendingMessage::getConsumerName)
                     .distinct()
                     .collect(Collectors.toList());
-            List<StreamInfo.XInfoConsumer> infoConsumersInactive = redisTemplate.opsForStream()
+            List<ConsumerPendingMessages> pendingMessages = redisTemplate.opsForStream()
                     .consumers(cg.getChannel(), cg.getGroup())
                     .stream().filter(x -> consumersNames.contains(x.consumerName()) && x.idleTimeMs() > 60000)
-                    .collect(Collectors.toList());
-            for(StreamInfo.XInfoConsumer infoConsumer : infoConsumersInactive){
-                ConsumerPendingMessages find = consumerPendingMessages.stream()
-                        .filter(x ->
-                                Objects.equals(x.getGroup(), infoConsumer.groupName())
-                                && Objects.equals(x.getConsumer(), infoConsumer.consumerName())
-                        ).findFirst().orElse(null);
-                if(find == null){
-                    ConsumerPendingMessages cpm = new ConsumerPendingMessages(
+                    .map(infoConsumer -> new ConsumerPendingMessages(
                             infoConsumer.groupName(),
                             infoConsumer.consumerName(),
                             cg.getChannel(),
-                            new ArrayList<>()
-                    );
-                    consumerPendingMessages.add(cpm);
-                } else {
-
-                }
-            }
+                            cg.getPendingMessages().stream()
+                                    .filter(x -> Objects.equals(infoConsumer.consumerName(), x.getConsumerName()))
+                                    .collect(Collectors.toList())
+                    ))
+                    .collect(Collectors.toList());
+            consumerPendingMessages.addAll(pendingMessages);
         }
         return consumerPendingMessages;
     }
 
 
+
+
+    @SneakyThrows
     private RLock getApplicationCoordinatorLock() {
-        String lockKey = RedisUtils.getApplicationCoordinatorLockKey(applicationName);
-        return getLock(lockKey, 1);
+        return lockExecutorService.submit(() -> {
+            String lockKey = RedisUtils.getApplicationCoordinatorLockKey(applicationName);
+            return getLock(lockKey, 1);
+        }).get();
     }
 
     private RLock getChannelAssignmentsLock(String baseChannel) {
@@ -177,11 +174,11 @@ public class RedisAssignmentsCoordinator {
         return null;
     }
 
-    public void close(){
+    public void close() throws Exception {
         if(timer != null)
             timer.cancel();
         if(applicationCoordinatorLock != null)
-           applicationCoordinatorLock.unlock();
+           lockExecutorService.submit(() -> applicationCoordinatorLock.unlock()).get();
     }
 
     @Getter

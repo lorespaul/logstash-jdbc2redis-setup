@@ -12,8 +12,6 @@ import org.springframework.data.redis.core.RedisTemplate;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 @Slf4j
 public class RedisMessageBrokerImpl implements DisposableBean {
@@ -24,7 +22,6 @@ public class RedisMessageBrokerImpl implements DisposableBean {
     private final RedisAssignmentsCoordinator assignmentsCoordinator;
     private final int partitionsCount;
     private final List<RedisMultiSubscription> subscriptions = Collections.synchronizedList(new ArrayList<>());
-    private final ExecutorService coordinatorStartStop;
 
     public RedisMessageBrokerImpl(RedisTemplate<String, String> redisTemplate,
                                   RedissonClient redissonClient,
@@ -40,8 +37,7 @@ public class RedisMessageBrokerImpl implements DisposableBean {
         this.assignmentsCoordinator = new RedisAssignmentsCoordinator(
                 this.consumerAssignmentsManager::getStreams, redisTemplate, redissonClient, mapper, applicationName, partitionsCount
         );
-        this.coordinatorStartStop = Executors.newSingleThreadExecutor();
-        this.coordinatorStartStop.submit(this.assignmentsCoordinator::start);
+        this.assignmentsCoordinator.start();
         this.partitionsCount = partitionsCount;
     }
 
@@ -95,9 +91,9 @@ public class RedisMessageBrokerImpl implements DisposableBean {
 
 
     @Override
-    public void destroy() throws Exception{
+    public void destroy() throws Exception {
         consumerAssignmentsManager.close();
-        this.coordinatorStartStop.submit(this.assignmentsCoordinator::close).get();
+        assignmentsCoordinator.close();
         synchronized (subscriptions){
             for(RedisMultiSubscription subscription : subscriptions)
                 subscription.close();
